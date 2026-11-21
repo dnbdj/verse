@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, assetUrl } from "../lib/api";
+import { loadPrefs, savePrefs } from "../lib/prefs";
 import type { Track } from "../lib/types";
 
 export type RepeatMode = "off" | "all" | "one";
@@ -32,14 +33,20 @@ export function usePlayer(): Player {
   const [playing, setPlaying] = useState(false);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [volume, setVolume] = useState(0.85);
-  const [shuffle, setShuffle] = useState(false);
-  const [repeat, setRepeat] = useState<RepeatMode>("off");
+  // Read once at mount so a restart keeps the listener's volume, shuffle and repeat.
+  const [initialPrefs] = useState(loadPrefs);
+  const [volume, setVolume] = useState(initialPrefs.volume);
+  const [shuffle, setShuffle] = useState(initialPrefs.shuffle);
+  const [repeat, setRepeat] = useState<RepeatMode>(initialPrefs.repeat);
 
   const queueRef = useRef<Track[]>([]);
   const indexRef = useRef(-1);
-  const shuffleRef = useRef(false);
-  const repeatRef = useRef<RepeatMode>("off");
+  const shuffleRef = useRef(initialPrefs.shuffle);
+  const repeatRef = useRef<RepeatMode>(initialPrefs.repeat);
+
+  useEffect(() => {
+    savePrefs({ volume, shuffle, repeat });
+  }, [volume, shuffle, repeat]);
 
   useEffect(() => {
     const element = new Audio();
