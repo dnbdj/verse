@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useLibrary } from "./hooks/useLibrary";
+import { useShortcuts } from "./hooks/useShortcuts";
 import { usePlayer } from "./hooks/usePlayer";
 import { useSpotify } from "./hooks/useSpotify";
 import { isAndroid } from "./lib/platform";
@@ -52,6 +53,13 @@ export default function App() {
   const [sort, setSort] = useState<Sort>("recent");
   const [nowPlayingOpen, setNowPlayingOpen] = useState(false);
   const [creating, setCreating] = useState<string | null>(null);
+
+  useShortcuts({
+    player,
+    overlayOpen: nowPlayingOpen,
+    onToggleOverlay: () => setNowPlayingOpen((open) => !open),
+    onCloseOverlay: () => setNowPlayingOpen(false),
+  });
 
   const albums = useMemo(() => {
     const map = new Map<string, AlbumGroup>();
