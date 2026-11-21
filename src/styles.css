@@ -91,6 +91,9 @@ textarea {
   grid-template-columns: 248px 1fr;
   grid-template-rows: 1fr auto;
   height: 100%;
+  /* Android runs edge to edge, so keep the UI clear of the status and gesture bars. */
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
   background:
     radial-gradient(110% 80% at 8% -12%, rgba(232, 180, 100, 0.1), transparent 58%),
     radial-gradient(75% 60% at 96% 0%, rgba(126, 140, 200, 0.055), transparent 68%),
