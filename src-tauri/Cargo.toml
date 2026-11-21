@@ -27,6 +27,9 @@ ureq = { version = "2", features = ["json"] }
 rand = "0.8"
 sha2 = "0.10"
 base64 = "0.22"
+
+# Mobile has no OS keychain, so keyring is desktop-only there.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 keyring = { version = "3", features = ["windows-native", "apple-native", "sync-secret-service", "crypto-rust"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]

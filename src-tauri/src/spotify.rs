@@ -19,20 +19,92 @@ fn cache() -> &'static Mutex<Option<(String, Instant)>> {
     TOKEN_CACHE.get_or_init(|| Mutex::new(None))
 }
 
+/// Desktop keeps secrets in the OS keychain. Android and iOS have none, so those
+/// platforms fall back to a file inside the app's private data directory.
+#[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
+pub fn set_secret_dir(dir: std::path::PathBuf) {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let _ = SECRETS_DIR.set(dir);
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        let _ = dir;
+    }
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+static SECRETS_DIR: OnceLock<std::path::PathBuf> = OnceLock::new();
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn secrets_path() -> Option<std::path::PathBuf> {
+    SECRETS_DIR.get().map(|dir| dir.join("spotify-secrets"))
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn read_secrets() -> Vec<(String, String)> {
+    let Some(path) = secrets_path() else {
+        return Vec::new();
+    };
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    text.lines()
+        .filter_map(|line| line.split_once('='))
+        .map(|(key, value)| (key.trim().to_string(), value.trim().to_string()))
+        .collect()
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn write_secrets(entries: &[(String, String)]) -> Result<(), String> {
+    let path = secrets_path().ok_or("no secret directory")?;
+    let body: String = entries.iter().map(|(key, value)| format!("{key}={value}\n")).collect();
+    std::fs::write(path, body).map_err(|e| format!("secret file: {e}"))
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn store(key: &str, value: &str) -> Result<(), String> {
+    let mut entries = read_secrets();
+    match entries.iter_mut().find(|(existing, _)| existing == key) {
+        Some(slot) => slot.1 = value.to_string(),
+        None => entries.push((key.to_string(), value.to_string())),
+    }
+    write_secrets(&entries)
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn load(key: &str) -> Option<String> {
+    read_secrets()
+        .into_iter()
+        .find(|(existing, _)| existing == key)
+        .map(|(_, value)| value)
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn forget(key: &str) {
+    let mut entries = read_secrets();
+    entries.retain(|(existing, _)| existing != key);
+    let _ = write_secrets(&entries);
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn entry(key: &str) -> Result<keyring::Entry, String> {
     keyring::Entry::new(SERVICE, key).map_err(|e| e.to_string())
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn store(key: &str, value: &str) -> Result<(), String> {
     entry(key)?
         .set_password(value)
         .map_err(|e| format!("keychain: {e}"))
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn load(key: &str) -> Option<String> {
     entry(key).ok()?.get_password().ok()
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn forget(key: &str) {
     if let Ok(entry) = entry(key) {
         let _ = entry.delete_credential();

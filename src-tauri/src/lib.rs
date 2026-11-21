@@ -434,6 +434,14 @@ pub fn run() {
             })?;
             app.manage(database);
 
+            // No OS keychain on mobile: point Spotify's secret store at the app data dir.
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            {
+                if let Ok(dir) = app.path().app_data_dir() {
+                    spotify::set_secret_dir(dir);
+                }
+            }
+
             #[cfg(target_os = "windows")]
             {
                 use tauri::Manager;
