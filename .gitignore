@@ -12,6 +12,7 @@ src-tauri/gen/android/local.properties
 .env.*
 *.keystore
 *.jks
+src-tauri/gen/android/keystore.properties
 
 *.log
 .DS_Store
