@@ -36,20 +36,36 @@ export function LyricsPane({ lines, active, timeMs, plain, loading, source, onSe
     );
   }
 
+  // Untimed lyrics still deserve the pane: readable size, one line per row, scrollable.
+  if (lines.length === 0 && plain) {
+    const plainLines = plain
+      .split(/\r?\n/)
+      .map((line) => line.trimEnd())
+      .filter((line, index, all) => line.trim() !== "" || all[index - 1]?.trim() !== "");
+    return (
+      <div className="lyrics-pane">
+        <div className="lyrics-plain">
+          <div className="lyrics-plain-label">Lyrics · not timed</div>
+          {plainLines.map((line, index) =>
+            line.trim() ? (
+              <p key={`${index}-${line.slice(0, 12)}`}>{line}</p>
+            ) : (
+              <div key={`gap-${index}`} className="lyrics-plain-gap" />
+            ),
+          )}
+        </div>
+      </div>
+    );
+  }
+
   if (lines.length === 0) {
     return (
       <div className="lyrics-pane">
         <div className="lyrics-empty">
-          {plain ? (
-            <span style={{ whiteSpace: "pre-wrap", textAlign: "left" }}>{plain}</span>
-          ) : (
-            <>
-              No lyrics for this track yet.
-              <br />
-              They come from LRCLIB first, then a sidecar .lrc, then you can paste your own.
-              {source === "none" ? "" : ` (source: ${source})`}
-            </>
-          )}
+          No lyrics for this track yet.
+          <br />
+          They come from LRCLIB first, then a sidecar .lrc, then you can paste your own.
+          {source === "none" ? "" : ` (source: ${source})`}
         </div>
       </div>
     );

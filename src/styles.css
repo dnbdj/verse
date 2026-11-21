@@ -723,6 +723,40 @@ input[type="range"]:hover::-webkit-slider-thumb {
   white-space: pre;
 }
 
+.lyrics-plain {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  padding: 6px 20px 40px 2px;
+  color: var(--text-dim);
+  font-size: 19px;
+  font-weight: 560;
+  letter-spacing: -0.01em;
+  line-height: 1.62;
+  scrollbar-width: thin;
+}
+
+.lyrics-plain-label {
+  position: sticky;
+  top: 0;
+  padding: 6px 0 12px;
+  margin-bottom: 6px;
+  background: linear-gradient(180deg, rgba(18, 18, 21, 0.92), rgba(18, 18, 21, 0));
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-faint);
+}
+
+.lyrics-plain p {
+  margin: 0;
+}
+
+.lyrics-plain-gap {
+  height: 12px;
+}
+
 .lyrics-empty {
   position: absolute;
   inset: 0;
