@@ -45,4 +45,8 @@ export const spotify = {
   control: (action: "play" | "pause" | "next" | "previous") =>
     invoke<void>("spotify_control", { action }),
   play: (uri: string) => invoke<void>("spotify_play", { uri }),
+  addToPlaylist: (playlistId: string, uri: string) =>
+    invoke<void>("spotify_add_to_playlist", { playlistId, uri }),
+  addBySearch: (playlistId: string, title: string, artist: string) =>
+    invoke<void>("spotify_add_by_search", { playlistId, title, artist }),
 };

@@ -12,6 +12,8 @@ export type SpotifyState = {
   reload: () => Promise<void>;
   control: (action: "play" | "pause" | "next" | "previous") => Promise<void>;
   playUri: (uri: string) => Promise<void>;
+  addToPlaylist: (playlistId: string, uri: string) => Promise<void>;
+  addBySearch: (playlistId: string, title: string, artist: string) => Promise<void>;
   clearError: () => void;
 };
 
@@ -113,6 +115,32 @@ export function useSpotify(): SpotifyState {
     }
   }, []);
 
+  const addToPlaylist = useCallback(
+    async (playlistId: string, uri: string) => {
+      try {
+        await spotify.addToPlaylist(playlistId, uri);
+        await loadLibrary();
+      } catch (cause) {
+        setError(String(cause));
+        throw cause;
+      }
+    },
+    [loadLibrary],
+  );
+
+  const addBySearch = useCallback(
+    async (playlistId: string, title: string, artist: string) => {
+      try {
+        await spotify.addBySearch(playlistId, title, artist);
+        await loadLibrary();
+      } catch (cause) {
+        setError(String(cause));
+        throw cause;
+      }
+    },
+    [loadLibrary],
+  );
+
   return {
     status,
     library,
@@ -124,6 +152,8 @@ export function useSpotify(): SpotifyState {
     reload,
     control,
     playUri,
+    addToPlaylist,
+    addBySearch,
     clearError: () => setError(null),
   };
 }

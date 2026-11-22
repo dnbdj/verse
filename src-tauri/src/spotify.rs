@@ -11,7 +11,7 @@ const AUTH_URL: &str = "https://accounts.spotify.com/authorize";
 const TOKEN_URL: &str = "https://accounts.spotify.com/api/token";
 const API: &str = "https://api.spotify.com/v1";
 const SERVICE: &str = "com.verse.player";
-const SCOPES: &str = "user-read-private user-read-playback-state user-modify-playback-state user-read-currently-playing user-library-read playlist-read-private";
+const SCOPES: &str = "user-read-private user-read-playback-state user-modify-playback-state user-read-currently-playing user-library-read playlist-read-private playlist-modify-private playlist-modify-public";
 
 static TOKEN_CACHE: OnceLock<Mutex<Option<(String, Instant)>>> = OnceLock::new();
 
@@ -58,7 +58,10 @@ fn read_secrets() -> Vec<(String, String)> {
 #[cfg(any(target_os = "android", target_os = "ios"))]
 fn write_secrets(entries: &[(String, String)]) -> Result<(), String> {
     let path = secrets_path().ok_or("no secret directory")?;
-    let body: String = entries.iter().map(|(key, value)| format!("{key}={value}\n")).collect();
+    let body: String = entries
+        .iter()
+        .map(|(key, value)| format!("{key}={value}\n"))
+        .collect();
     std::fs::write(path, body).map_err(|e| format!("secret file: {e}"))
 }
 
@@ -214,10 +217,7 @@ pub async fn spotify_login(app: tauri::AppHandle) -> Result<SpotifyStatus, Strin
     let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
 
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| format!("port: {e}"))?;
-    let port = listener
-        .local_addr()
-        .map_err(|e| e.to_string())?
-        .port();
+    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let redirect = format!("http://127.0.0.1:{port}/callback");
 
     let url = format!(
@@ -347,10 +347,42 @@ pub fn spotify_play(uri: String) -> Result<(), String> {
     api_json("PUT", "/me/player/play", Some(body)).map(|_| ())
 }
 
+/// Adds one already-resolved Spotify track URI to one of the signed-in user's playlists.
+#[tauri::command]
+pub fn spotify_add_to_playlist(playlist_id: String, uri: String) -> Result<(), String> {
+    if playlist_id.trim().is_empty() {
+        return Err("Pick a Spotify playlist first".into());
+    }
+    if !uri.starts_with("spotify:track:") {
+        return Err("That item is not a Spotify track".into());
+    }
+    let path = format!("/playlists/{}/tracks", playlist_id.trim());
+    api_json("POST", &path, Some(serde_json::json!({ "uris": [uri] }))).map(|_| ())
+}
+
+/// Resolves a track from another service by title/artist, then adds it to Spotify.
+#[tauri::command]
+pub fn spotify_add_by_search(
+    playlist_id: String,
+    title: String,
+    artist: String,
+) -> Result<(), String> {
+    let query = format!("track:{} artist:{}", title.trim(), artist.trim());
+    let path = format!("/search?q={}&type=track&limit=1", enc(&query));
+    let found = api_json("GET", &path, None)?;
+    let uri = found
+        .get("tracks")
+        .and_then(|tracks| tracks.get("items"))
+        .and_then(|items| items.as_array())
+        .and_then(|items| items.first())
+        .and_then(|track| track.get("uri"))
+        .and_then(|uri| uri.as_str())
+        .ok_or_else(|| format!("No Spotify match for {title}"))?;
+    spotify_add_to_playlist(playlist_id, uri.to_string())
+}
+
 fn wait_for_code(listener: TcpListener) -> Result<String, String> {
-    listener
-        .set_nonblocking(false)
-        .map_err(|e| e.to_string())?;
+    listener.set_nonblocking(false).map_err(|e| e.to_string())?;
     let deadline = Instant::now() + Duration::from_secs(180);
 
     for stream in listener.incoming() {

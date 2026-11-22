@@ -2,11 +2,75 @@ import { useState } from "react";
 import type { CSSProperties } from "react";
 import { formatTime } from "../lib/format";
 import type { SpotifyState } from "../hooks/useSpotify";
+import { remoteFromSpotify } from "../lib/remoteTracks";
+import type { Playlist, RemoteTrack } from "../lib/types";
 import { NextIcon, PauseIcon, PlayIcon, PrevIcon } from "./icons";
+import { PlaylistPicker } from "./PlaylistPicker";
 
-export function SpotifyView({ spotify }: { spotify: SpotifyState }) {
+type Props = {
+  spotify: SpotifyState;
+  playlists: Playlist[];
+  onAddRemote: (playlistId: string, track: RemoteTrack) => Promise<void>;
+  onCreatePlaylist: (name: string, track: RemoteTrack) => Promise<void>;
+  /** "liked" is the standalone Liked songs page; "all" is the Spotify page. */
+  section?: "all" | "liked";
+};
+
+export function SpotifyView({
+  spotify,
+  playlists,
+  onAddRemote,
+  onCreatePlaylist,
+  section = "all",
+}: Props) {
   const [clientId, setClientId] = useState("");
   const { status, library, playback, busy, error } = spotify;
+
+  const likedPanel = (
+    <div>
+      <div className="nav-label" style={{ padding: "0 4px 10px" }}>
+        {section === "liked"
+          ? `${library.liked.length} liked ${library.liked.length === 1 ? "song" : "songs"}`
+          : "Liked songs"}
+      </div>
+      <div className="panel">
+        {library.liked
+          .slice(0, section === "liked" ? library.liked.length : 30)
+          .map((track) => (
+            <div key={track.id} className="track-row" style={{ gridTemplateColumns: "1fr 60px 30px 30px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                {track.art ? (
+                  <img className="cover" src={track.art} alt="" style={{ width: 36, height: 36 }} />
+                ) : (
+                  <div className="cover" style={{ width: 36, height: 36 }} />
+                )}
+                <div style={{ minWidth: 0 }}>
+                  <div className="track-title">{track.name}</div>
+                  <div className="track-artist">{track.artists}</div>
+                </div>
+              </div>
+              <div className="track-dur">{formatTime(track.durationMs)}</div>
+              <button
+                className="btn-icon"
+                title="Play on Spotify"
+                onClick={() => void spotify.playUri(track.uri)}
+              >
+                <PlayIcon size={15} />
+              </button>
+              <PlaylistPicker
+                playlists={playlists}
+                label={`Add ${track.name} to a playlist`}
+                onPick={(playlistId) => onAddRemote(playlistId, remoteFromSpotify(track))}
+                onCreate={(name) => onCreatePlaylist(name, remoteFromSpotify(track))}
+              />
+            </div>
+          ))}
+        {library.liked.length === 0 && (
+          <div className="empty-state">No liked songs found.</div>
+        )}
+      </div>
+    </div>
+  );
 
   if (!status) {
     return (
@@ -72,6 +136,12 @@ export function SpotifyView({ spotify }: { spotify: SpotifyState }) {
           </div>
         )}
       </div>
+    );
+  }
+
+  if (section === "liked") {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>{likedPanel}</div>
     );
   }
 
@@ -144,7 +214,7 @@ export function SpotifyView({ spotify }: { spotify: SpotifyState }) {
 
       <div>
         <div className="nav-label" style={{ padding: "0 4px 10px" }}>
-          Your playlists
+          Spotify playlists
         </div>
         <div className="album-grid">
           {library.playlists.map((playlist) => (
@@ -166,39 +236,7 @@ export function SpotifyView({ spotify }: { spotify: SpotifyState }) {
         </div>
       </div>
 
-      <div>
-        <div className="nav-label" style={{ padding: "0 4px 10px" }}>
-          Liked songs
-        </div>
-        <div className="panel">
-          {library.liked.slice(0, 30).map((track) => (
-            <div key={track.id} className="track-row" style={{ gridTemplateColumns: "1fr 60px 30px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                {track.art ? (
-                  <img className="cover" src={track.art} alt="" style={{ width: 36, height: 36 }} />
-                ) : (
-                  <div className="cover" style={{ width: 36, height: 36 }} />
-                )}
-                <div style={{ minWidth: 0 }}>
-                  <div className="track-title">{track.name}</div>
-                  <div className="track-artist">{track.artists}</div>
-                </div>
-              </div>
-              <div className="track-dur">{formatTime(track.durationMs)}</div>
-              <button
-                className="btn-icon"
-                title="Play on Spotify"
-                onClick={() => void spotify.playUri(track.uri)}
-              >
-                <PlayIcon size={15} />
-              </button>
-            </div>
-          ))}
-          {library.liked.length === 0 && (
-            <div className="empty-state">No liked songs found.</div>
-          )}
-        </div>
-      </div>
+      {likedPanel}
     </div>
   );
 }

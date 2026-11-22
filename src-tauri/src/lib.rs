@@ -1,11 +1,17 @@
 mod db;
+mod deeplink;
 mod lyrics;
 mod scan;
 mod spotify;
+mod update;
 
-use db::{now_ms, Db, Folder, LyricsPayload, Playlist, Track};
+use db::{now_ms, Db, Folder, LyricsPayload, Playlist, RemoteTrack, Track};
 use rusqlite::{params, OptionalExtension};
-use tauri::{AppHandle, Manager, State};
+use std::sync::Mutex;
+use tauri::{AppHandle, Emitter, Manager, State};
+
+/// A deep link that arrived at launch, held until the webview asks for it once.
+struct PendingDeepLink(Mutex<Option<String>>);
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -108,47 +114,48 @@ async fn scan_device_music(app: AppHandle) -> Result<ScanSummary, String> {
 
     #[cfg(target_os = "android")]
     {
-        let summary = tauri::async_runtime::spawn_blocking(move || -> Result<ScanSummary, String> {
-            let state = app.state::<Db>();
-            let conn = state.conn.lock().map_err(|e| e.to_string())?;
-            let roots = [
-                "/storage/emulated/0/Music",
-                "/sdcard/Music",
-                "/storage/emulated/0/Download",
-                "/storage/emulated/0/Podcasts",
-            ];
-            let mut total = ScanSummary {
-                added: 0,
-                updated: 0,
-                skipped: 0,
-            };
-            let mut scanned_any = false;
-            for root in roots {
-                let path = std::path::Path::new(root);
-                if !path.is_dir() || root == "/sdcard/Music" && scanned_any {
-                    continue;
+        let summary =
+            tauri::async_runtime::spawn_blocking(move || -> Result<ScanSummary, String> {
+                let state = app.state::<Db>();
+                let conn = state.conn.lock().map_err(|e| e.to_string())?;
+                let roots = [
+                    "/storage/emulated/0/Music",
+                    "/sdcard/Music",
+                    "/storage/emulated/0/Download",
+                    "/storage/emulated/0/Podcasts",
+                ];
+                let mut total = ScanSummary {
+                    added: 0,
+                    updated: 0,
+                    skipped: 0,
+                };
+                let mut scanned_any = false;
+                for root in roots {
+                    let path = std::path::Path::new(root);
+                    if !path.is_dir() || root == "/sdcard/Music" && scanned_any {
+                        continue;
+                    }
+                    scanned_any = true;
+                    conn.execute(
+                        "INSERT OR IGNORE INTO folders (path, added_at) VALUES (?1, ?2)",
+                        params![root, now_ms()],
+                    )
+                    .map_err(|e| e.to_string())?;
+                    let result = scan::scan_folder(path, &conn, &state.covers)?;
+                    total.added += result.added;
+                    total.updated += result.updated;
+                    total.skipped += result.skipped;
                 }
-                scanned_any = true;
-                conn.execute(
-                    "INSERT OR IGNORE INTO folders (path, added_at) VALUES (?1, ?2)",
-                    params![root, now_ms()],
-                )
-                .map_err(|e| e.to_string())?;
-                let result = scan::scan_folder(path, &conn, &state.covers)?;
-                total.added += result.added;
-                total.updated += result.updated;
-                total.skipped += result.skipped;
-            }
-            if !scanned_any {
-                return Err(
+                if !scanned_any {
+                    return Err(
                     "No music folder found on this device — copy songs into Music and try again"
                         .to_string(),
                 );
-            }
-            Ok(total)
-        })
-        .await
-        .map_err(|e| e.to_string())??;
+                }
+                Ok(total)
+            })
+            .await
+            .map_err(|e| e.to_string())??;
 
         Ok(summary)
     }
@@ -182,18 +189,22 @@ fn mark_played(db: State<'_, Db>, track_id: String) -> Result<(), String> {
 fn list_playlists(db: State<'_, Db>) -> Result<Vec<Playlist>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
-        .prepare("SELECT id, name FROM playlists ORDER BY created_at ASC")
+        .prepare("SELECT id, name, remote_tracks FROM playlists ORDER BY created_at ASC")
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
         })
         .map_err(|e| e.to_string())?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(|e| e.to_string())?;
 
     let mut playlists = Vec::with_capacity(rows.len());
-    for (id, name) in rows {
+    for (id, name, remote_raw) in rows {
         let mut track_stmt = conn
             .prepare(
                 "SELECT track_id FROM playlist_tracks WHERE playlist_id = ?1 ORDER BY position ASC",
@@ -208,6 +219,7 @@ fn list_playlists(db: State<'_, Db>) -> Result<Vec<Playlist>, String> {
             id,
             name,
             track_ids,
+            remote_tracks: serde_json::from_str(&remote_raw).unwrap_or_default(),
         });
     }
     Ok(playlists)
@@ -226,6 +238,7 @@ fn create_playlist(db: State<'_, Db>, name: String) -> Result<Playlist, String> 
         id,
         name,
         track_ids: Vec::new(),
+        remote_tracks: Vec::new(),
     })
 }
 
@@ -253,6 +266,99 @@ fn add_to_playlist(db: State<'_, Db>, playlist_id: String, track_id: String) -> 
     )
     .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Saves a song from any streaming service into a Verse playlist. The JSON row
+/// keeps it beside local tracks without polluting the on-disk library index.
+#[tauri::command]
+fn add_remote_to_playlist(
+    db: State<'_, Db>,
+    playlist_id: String,
+    track: RemoteTrack,
+) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    db::add_remote_track(&conn, &playlist_id, &track)
+}
+
+#[tauri::command]
+fn remove_remote_from_playlist(
+    db: State<'_, Db>,
+    playlist_id: String,
+    track_id: String,
+) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    db::remove_remote_track(&conn, &playlist_id, &track_id)
+}
+
+#[tauri::command]
+fn rename_playlist(db: State<'_, Db>, playlist_id: String, name: String) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    db::rename_playlist(&conn, &playlist_id, &name)
+}
+
+#[tauri::command]
+fn reorder_playlist(
+    db: State<'_, Db>,
+    playlist_id: String,
+    track_ids: Vec<String>,
+) -> Result<(), String> {
+    let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
+    db::reorder_playlist(&mut conn, &playlist_id, &track_ids)
+}
+
+/// Hands a launch-time `verse://` link to the webview exactly once.
+#[tauri::command]
+fn take_deep_link(state: State<'_, PendingDeepLink>) -> Option<String> {
+    state.0.lock().ok().and_then(|mut slot| slot.take())
+}
+
+/// Writes the settings bundle wherever the person picks; cancelling is not an error.
+#[tauri::command]
+fn save_bundle(
+    app: AppHandle,
+    contents: String,
+    file_name: String,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let Some(target) = app
+        .dialog()
+        .file()
+        .set_file_name(&file_name)
+        .add_filter("Verse bundle", &["json"])
+        .blocking_save_file()
+    else {
+        return Ok(None);
+    };
+
+    let path = target.into_path().map_err(|e| e.to_string())?;
+    std::fs::write(&path, contents).map_err(|e| e.to_string())?;
+    Ok(Some(path.display().to_string()))
+}
+
+/// Reads a bundle the person picks. The size cap keeps a stray huge file out of memory;
+/// validation happens in the frontend, which already owns the error messages.
+#[tauri::command]
+fn open_bundle(app: AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let Some(picked) = app
+        .dialog()
+        .file()
+        .add_filter("Verse bundle", &["json"])
+        .blocking_pick_file()
+    else {
+        return Ok(None);
+    };
+
+    let path = picked.into_path().map_err(|e| e.to_string())?;
+    let size = std::fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0);
+    if size > 512 * 1024 {
+        return Err("That bundle is too large (limit 512 KB).".to_string());
+    }
+    std::fs::read_to_string(&path)
+        .map(Some)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -425,14 +531,53 @@ fn forget_lyrics(db: State<'_, Db>, track_id: String) -> Result<LyricsPayload, S
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+
+    // The single-instance plugin must be registered first, so a second launch on
+    // Windows/Linux forwards its verse:// argument here instead of opening a new window.
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.unminimize();
+            let _ = window.set_focus();
+        }
+        if let Some(url) = deeplink::from_args(argv) {
+            let _ = app.emit(deeplink::EVENT, url);
+        }
+    }));
+
+    builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_notification::init())
+        .manage(PendingDeepLink(Mutex::new(None)))
         .setup(|app| {
             let database = db::init(app.handle()).map_err(|e| -> Box<dyn std::error::Error> {
                 Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))
             })?;
             app.manage(database);
+
+            // A cold start carries the link as an argument; hold it for the first mount.
+            #[cfg(desktop)]
+            {
+                if let Some(url) = deeplink::from_args(std::env::args()) {
+                    if let Some(pending) = app.try_state::<PendingDeepLink>() {
+                        if let Ok(mut slot) = pending.0.lock() {
+                            *slot = Some(url);
+                        }
+                    }
+                }
+
+                // Registers verse:// with the OS (HKCU on Windows, the desktop file on
+                // Linux). Installers also register it; this covers a dev launch.
+                {
+                    use tauri_plugin_deep_link::DeepLinkExt;
+                    if let Err(error) = app.deep_link().register_all() {
+                        eprintln!("[verse] deep link registration failed: {error}");
+                    }
+                }
+            }
 
             // No OS keychain on mobile: point Spotify's secret store at the app data dir.
             #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -467,7 +612,15 @@ pub fn run() {
             create_playlist,
             delete_playlist,
             add_to_playlist,
+            add_remote_to_playlist,
+            remove_remote_from_playlist,
             remove_from_playlist,
+            rename_playlist,
+            reorder_playlist,
+            take_deep_link,
+            update::check_for_update,
+            save_bundle,
+            open_bundle,
             lyrics_for,
             save_lyrics,
             forget_lyrics,
@@ -478,7 +631,9 @@ pub fn run() {
             spotify::spotify_library,
             spotify::spotify_playback,
             spotify::spotify_control,
-            spotify::spotify_play
+            spotify::spotify_play,
+            spotify::spotify_add_to_playlist,
+            spotify::spotify_add_by_search
         ])
         .run(tauri::generate_context!())
         .expect("error while running Verse");

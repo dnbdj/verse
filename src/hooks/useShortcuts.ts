@@ -6,6 +6,8 @@ type Options = {
   overlayOpen: boolean;
   onToggleOverlay: () => void;
   onCloseOverlay: () => void;
+  /** Alt+1…9 opens the same pinned service shown at that position in the sidebar. */
+  onQuickLaunch: (index: number) => void;
 };
 
 const isTyping = (target: EventTarget | null): boolean => {
@@ -16,19 +18,44 @@ const isTyping = (target: EventTarget | null): boolean => {
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
 };
 
-/** Transport shortcuts: space plays, arrows seek, ctrl/arrows change volume, L toggles the player. */
-export function useShortcuts({ player, overlayOpen, onToggleOverlay, onCloseOverlay }: Options) {
+/** Transport shortcuts plus Alt+1…9 quick launch for the sidebar's pinned services. */
+export function useShortcuts({
+  player,
+  overlayOpen,
+  onToggleOverlay,
+  onCloseOverlay,
+  onQuickLaunch,
+}: Options) {
   const lastVolume = useRef(0.85);
   // The player object is rebuilt on every tick, so keep it in a ref and subscribe once.
-  const live = useRef({ player, overlayOpen, onToggleOverlay, onCloseOverlay });
-  live.current = { player, overlayOpen, onToggleOverlay, onCloseOverlay };
+  const live = useRef({ player, overlayOpen, onToggleOverlay, onCloseOverlay, onQuickLaunch });
+  live.current = { player, overlayOpen, onToggleOverlay, onCloseOverlay, onQuickLaunch };
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      const { player: current, overlayOpen: open, onToggleOverlay: toggle, onCloseOverlay: close } =
-        live.current;
+      const {
+        player: current,
+        overlayOpen: open,
+        onToggleOverlay: toggle,
+        onCloseOverlay: close,
+        onQuickLaunch: quickLaunch,
+      } = live.current;
 
-      if (event.metaKey || event.altKey) return;
+      if (event.metaKey) return;
+
+      if (event.altKey) {
+        const digit = /^Digit([1-9])$/.exec(event.code);
+        if (
+          digit &&
+          !event.ctrlKey &&
+          !isTyping(event.target) &&
+          !isTyping(document.activeElement)
+        ) {
+          event.preventDefault();
+          quickLaunch(Number(digit[1]) - 1);
+        }
+        return;
+      }
 
       if (event.key === "Escape" && open) {
         close();
@@ -44,7 +71,13 @@ export function useShortcuts({ player, overlayOpen, onToggleOverlay, onCloseOver
 
       switch (event.key) {
         case " ":
+          event.preventDefault();
+          current.toggle();
+          break;
         case "k":
+        case "K":
+          // Ctrl/⌘K belongs to the command palette.
+          if (event.ctrlKey) return;
           event.preventDefault();
           current.toggle();
           break;

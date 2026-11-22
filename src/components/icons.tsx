@@ -150,6 +150,94 @@ export function QueueIcon({ size = 17 }: IconProps) {
   );
 }
 
+export function GearIcon({ size = 16 }: IconProps) {
+  return (
+    <svg {...frame(size)}>
+      <circle cx="12" cy="12" r="3.1" />
+      <path d="M19.4 14a7.7 7.7 0 0 0 0-4l1.6-1.1-1.9-3.2-1.9.8a7.7 7.7 0 0 0-3.4-2L13.4 2.6h-2.8l-.4 1.9a7.7 7.7 0 0 0-3.4 2l-1.9-.8L3 8.9 4.6 10a7.7 7.7 0 0 0 0 4L3 15.1l1.9 3.2 1.9-.8a7.7 7.7 0 0 0 3.4 2l.4 1.9h2.8l.4-1.9a7.7 7.7 0 0 0 3.4-2l1.9.8 1.9-3.2L19.4 14Z" />
+    </svg>
+  );
+}
+
+export function CheckIcon({ size = 14 }: IconProps) {
+  return (
+    <svg {...frame(size)} strokeWidth={2.6}>
+      <path d="m5 12.6 4.6 4.6L19 7.4" />
+    </svg>
+  );
+}
+
+export function ExternalIcon({ size = 15 }: IconProps) {
+  return (
+    <svg {...frame(size)}>
+      <path d="M14 4h6v6" />
+      <path d="m20 4-8.5 8.5" />
+      <path d="M18 14.5V19a1.5 1.5 0 0 1-1.5 1.5H5.5A1.5 1.5 0 0 1 4 19V8a1.5 1.5 0 0 1 1.5-1.5H10" />
+    </svg>
+  );
+}
+
+export function ChevronIcon({
+  size = 14,
+  dir = "left",
+}: IconProps & { dir?: "left" | "right" | "down" | "up" }) {
+  return (
+    <svg {...frame(size)}>
+      <path
+        d={
+          dir === "left"
+            ? "M14 6l-6 6 6 6"
+            : dir === "right"
+              ? "M10 6l6 6-6 6"
+              : dir === "down"
+                ? "M6 10l6 6 6-6"
+                : "M6 14l6-6 6 6"
+        }
+      />
+    </svg>
+  );
+}
+
+export function PencilIcon({ size = 14 }: IconProps) {
+  return (
+    <svg {...frame(size)}>
+      <path d="M4 20h4L18.5 9.5a2 2 0 0 0-4-4L4 16v4Z" />
+      <path d="m13.5 6.5 4 4" />
+    </svg>
+  );
+}
+
+export function PinIcon({ size = 15, filled = false }: IconProps & { filled?: boolean }) {
+  return (
+    <svg {...frame(size)} fill={filled ? "currentColor" : "none"}>
+      <path d="M9.2 3.6h5.6l-.7 5.1 3 2.6v1.8H6.9v-1.8l3-2.6-.7-5.1Z" />
+      <path d="M12 13.1v7" />
+    </svg>
+  );
+}
+
+export function CopyIcon({ size = 15 }: IconProps) {
+  return (
+    <svg {...frame(size)}>
+      <rect x="8.4" y="8.4" width="11.2" height="11.2" rx="2.6" />
+      <path d="M15.6 5.4H6.6A2.4 2.4 0 0 0 4.2 7.8v9" />
+    </svg>
+  );
+}
+
+export function DiceIcon({ size = 15 }: IconProps) {
+  return (
+    <svg {...frame(size)}>
+      <rect x="3.4" y="3.4" width="17.2" height="17.2" rx="4.4" />
+      <circle cx="8.4" cy="8.4" r="1.1" fill="currentColor" stroke="none" />
+      <circle cx="15.6" cy="8.4" r="1.1" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="12" r="1.1" fill="currentColor" stroke="none" />
+      <circle cx="8.4" cy="15.6" r="1.1" fill="currentColor" stroke="none" />
+      <circle cx="15.6" cy="15.6" r="1.1" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 export function TrashIcon({ size = 15 }: IconProps) {
   return (
     <svg {...frame(size)}>
