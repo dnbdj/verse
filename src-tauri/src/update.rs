@@ -7,7 +7,7 @@
 use std::time::Duration;
 
 use serde::Serialize;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 /// The public repository whose Releases carry Verse builds.
 const REPO: &str = "dnbdj/verse";
