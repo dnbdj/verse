@@ -22,7 +22,9 @@ import {
   THEMES,
   gradientCss,
   randomGradient,
+  resolveAccent,
   sameGradient,
+  themeMeta,
   type Appearance,
   type Gradient,
   type SavedLook,
@@ -144,7 +146,8 @@ const pct = (value: number, min: number, max: number) =>
 
 const accentColour = (appearance: Appearance): string =>
   appearance.accentHex ??
-  ACCENTS.find((accent) => accent.id === appearance.accent)?.color ??
+  ACCENTS.find((accent) => accent.id === resolveAccent(appearance.theme, appearance.accent))
+    ?.color ??
   "#0a84ff";
 
 function HexField({
@@ -266,6 +269,9 @@ export function SettingsView({
 
   const set = (patch: Partial<Appearance>) => onChange(patch);
   const gradient = appearance.gradient;
+  const automaticAccent = ACCENTS.find(
+    (entry) => entry.id === resolveAccent(appearance.theme, appearance.accent),
+  );
 
   const patchGradient = (next: Partial<Gradient>) => {
     if (!gradient) return;
@@ -1132,10 +1138,37 @@ export function SettingsView({
           <div className="settings-label">
             <div className="setting-title">Accent colour</div>
             <div className="setting-sub">
-              Tints buttons, sliders, active rows and highlights. The last swatch is any colour you
-              like.
+              {appearance.accent === "auto"
+                ? `Automatic — follows ${themeMeta(appearance.theme).name} and uses ${(
+                    automaticAccent?.name ?? "blue"
+                  ).toLowerCase()} across the window.`
+                : "Manual — tints buttons, sliders, active rows and highlights. The last swatch is any colour you like."}
             </div>
           </div>
+          <div className="accent-controls">
+            <div className="segmented" role="group" aria-label="Accent mode">
+              <button
+                className="segment"
+                data-active={appearance.accent === "auto"}
+                onClick={() => set({ accent: "auto", accentHex: null })}
+              >
+                Automatic
+              </button>
+              <button
+                className="segment"
+                data-active={appearance.accent !== "auto"}
+                onClick={() =>
+                  set({
+                    accent: resolveAccent(appearance.theme, appearance.accent),
+                    accentHex: appearance.accentHex,
+                  })
+                }
+              >
+                Manual
+              </button>
+            </div>
+
+            {appearance.accent !== "auto" && (
           <div className="swatches">
             {ACCENTS.map((accent) => {
               const active = appearance.accent === accent.id;
@@ -1172,6 +1205,8 @@ export function SettingsView({
                 <CheckIcon size={12} />
               </span>
             </label>
+          </div>
+            )}
           </div>
         </div>
 

@@ -1,7 +1,15 @@
 import type { Prefs } from "./prefs";
 
 export type ThemeId = "aurora" | "velvet" | "graphite" | "mist";
-export type AccentId = "blue" | "violet" | "pink" | "orange" | "green" | "graphite" | "custom";
+export type AccentId =
+  | "auto"
+  | "blue"
+  | "violet"
+  | "pink"
+  | "orange"
+  | "green"
+  | "graphite"
+  | "custom";
 export type GlassLevel = "clear" | "frosted" | "solid";
 export type Density = "cozy" | "compact";
 export type SidebarMode = "full" | "hidden";
@@ -55,6 +63,8 @@ export type ThemeMeta = {
   name: string;
   note: string;
   scheme: "dark" | "light";
+  /** The accent this palette reaches for when the accent mode is Automatic. */
+  accent: Exclude<AccentId, "custom" | "auto">;
   /** Gradient shown on the theme card, so the palette is recognisable before applying it. */
   preview: string;
 };
@@ -65,6 +75,7 @@ export const THEMES: ThemeMeta[] = [
     name: "Aurora",
     note: "Blue and violet glass over deep space",
     scheme: "dark",
+    accent: "blue",
     preview:
       "linear-gradient(145deg, #0a84ff 0%, #5e5ce6 42%, #bf5af2 68%, #ff375f 100%)",
   },
@@ -73,6 +84,7 @@ export const THEMES: ThemeMeta[] = [
     name: "Velvet",
     note: "Plum, rose and a whisper of honey",
     scheme: "dark",
+    accent: "violet",
     preview:
       "linear-gradient(145deg, #bf5af2 0%, #ff2d78 46%, #ff9f0a 82%, #6e5cff 100%)",
   },
@@ -81,6 +93,7 @@ export const THEMES: ThemeMeta[] = [
     name: "Graphite",
     note: "Neutral studio grey, colour left to the artwork",
     scheme: "dark",
+    accent: "graphite",
     preview:
       "linear-gradient(145deg, #5b5b63 0%, #2c2c31 45%, #8e8e93 78%, #1b1b1f 100%)",
   },
@@ -89,6 +102,7 @@ export const THEMES: ThemeMeta[] = [
     name: "Mist",
     note: "Daylight glass for bright rooms",
     scheme: "light",
+    accent: "blue",
     preview:
       "linear-gradient(145deg, #f7f8fc 0%, #dfe7f6 40%, #efdff0 72%, #fdf1e3 100%)",
   },
@@ -321,6 +335,18 @@ export function themeMeta(id: ThemeId): ThemeMeta {
 }
 
 /**
+ * The accent actually painted. Automatic follows the theme's own colour and Manual
+ * keeps the picked preset; custom colours are painted from `accentHex` instead.
+ */
+export function resolveAccent(
+  theme: ThemeId,
+  accent: AccentId,
+): Exclude<AccentId, "custom" | "auto"> {
+  if (accent === "auto" || accent === "custom") return themeMeta(theme).accent;
+  return accent;
+}
+
+/**
  * Paints the window by swapping the token sets picked in Settings. Called before the
  * first render and again on every change, so there is never a half-themed frame.
  */
@@ -330,7 +356,7 @@ export function applyAppearance(appearance: Appearance, artAccent: string | null
   const tokens = accentTokens(appearance, artAccent);
 
   root.dataset.theme = appearance.theme;
-  root.dataset.accent = appearance.accent;
+  root.dataset.accent = resolveAccent(appearance.theme, appearance.accent);
   root.dataset.glass = appearance.glass;
   root.dataset.motion = appearance.motion ? "on" : "off";
   root.dataset.density = appearance.density;

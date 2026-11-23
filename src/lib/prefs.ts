@@ -54,7 +54,7 @@ export const DEFAULT_PREFS: Prefs = {
   shuffle: false,
   repeat: "off",
   theme: "aurora",
-  accent: "blue",
+  accent: "auto",
   glass: "frosted",
   gradient: null,
   accentHex: null,
@@ -84,7 +84,7 @@ const clamp = (value: unknown, min: number, max: number, fallback: number): numb
 };
 
 const THEME_IDS = THEMES.map((theme) => theme.id);
-const ACCENT_IDS: AccentId[] = [...ACCENTS.map((accent) => accent.id), "custom"];
+const ACCENT_IDS: AccentId[] = ["auto", ...ACCENTS.map((accent) => accent.id), "custom"];
 const GLASS_IDS = GLASS_LEVELS.map((level) => level.id);
 const SERVICE_IDS = SERVICES.map((service) => service.id);
 

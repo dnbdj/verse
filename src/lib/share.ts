@@ -33,7 +33,7 @@ export type Look = Pick<
 export type LookResult = { ok: true; look: Look } | { ok: false; error: string };
 
 const HEX = /^#[0-9a-f]{6}$/i;
-const ACCENT_IDS: AccentId[] = [...ACCENTS.map((accent) => accent.id), "custom"];
+const ACCENT_IDS: AccentId[] = ["auto", ...ACCENTS.map((accent) => accent.id), "custom"];
 const GLASS_IDS = GLASS_LEVELS.map((level) => level.id);
 const DENSITIES = ["cozy", "compact"];
 
