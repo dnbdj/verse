@@ -56,6 +56,40 @@ pub fn is_newer(latest: &str, current: &str) -> bool {
     false
 }
 
+/// Windows files every toast under an AppUserModelID, and an unpackaged exe that
+/// never registered one has its notification dropped without an error. Verse uses
+/// its bundle identifier, registered per user so a portable copy works anywhere.
+#[cfg(windows)]
+fn claim_windows_identity() {
+    use std::os::windows::process::CommandExt;
+
+    /// The bundle identifier from tauri.conf.json.
+    const AUMID: &str = "com.verse.player";
+    /// Stops the helper console window from flashing on screen.
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let key = format!("HKCU\\Software\\Classes\\AppUserModelId\\{AUMID}");
+    let mut values = vec![("DisplayName", "Verse".to_string())];
+    if let Ok(exe) = std::env::current_exe() {
+        values.push(("IconUri", exe.display().to_string()));
+    }
+    for (name, value) in values {
+        let _ = std::process::Command::new("reg")
+            .args(["add", &key, "/v", name, "/t", "REG_SZ", "/d", &value, "/f"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+    }
+
+    #[link(name = "shell32")]
+    extern "system" {
+        fn SetCurrentProcessExplicitAppUserModelID(app_id: *const u16) -> i32;
+    }
+    let wide: Vec<u16> = AUMID.encode_utf16().chain(std::iter::once(0)).collect();
+    unsafe {
+        SetCurrentProcessExplicitAppUserModelID(wide.as_ptr());
+    }
+}
+
 /// Says it once per launch, so a re-render never repeats the toast.
 fn announce(app: &AppHandle, info: &UpdateInfo) {
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -63,6 +97,9 @@ fn announce(app: &AppHandle, info: &UpdateInfo) {
     if ANNOUNCED.swap(true, Ordering::SeqCst) {
         return;
     }
+
+    #[cfg(windows)]
+    claim_windows_identity();
 
     #[cfg(desktop)]
     {
