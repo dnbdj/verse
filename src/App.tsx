@@ -108,6 +108,8 @@ export default function App() {
   );
   const [arrival, setArrival] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [updating, setUpdating] = useState(false);
+  const [updateError, setUpdateError] = useState<string | null>(null);
   const [previewArtwork, setPreviewArtwork] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [reordering, setReordering] = useState<string | null>(null);
@@ -1112,18 +1114,30 @@ export default function App() {
       {updateInfo && (
         <div
           className="arrival-banner"
-          data-kind="ok"
+          data-kind={updateError ? "error" : "ok"}
           role="status"
           style={arrival ? { top: 62 } : undefined}
         >
           <span title={updateInfo.notes || undefined}>
-            Verse {updateInfo.latest} is available — you are on {updateInfo.current}.
+            {updateError
+              ? `Update failed: ${updateError}`
+              : updating
+                ? `Downloading Verse ${updateInfo.latest} — Verse restarts when it is ready.`
+                : `Verse ${updateInfo.latest} is available — you are on ${updateInfo.current}.`}
           </span>
           <button
             className="btn btn-primary"
-            onClick={() => void openExternal(updateInfo.url)}
+            disabled={updating}
+            onClick={() => {
+              setUpdating(true);
+              setUpdateError(null);
+              void api.installUpdate().catch((error) => {
+                setUpdateError(String(error));
+                setUpdating(false);
+              });
+            }}
           >
-            Download
+            {updating ? "Updating…" : "Update now"}
           </button>
           <button
             className="btn-icon"

@@ -619,6 +619,7 @@ pub fn run() {
             reorder_playlist,
             take_deep_link,
             update::check_for_update,
+            update::install_update,
             save_bundle,
             open_bundle,
             lyrics_for,

@@ -40,6 +40,7 @@ export const api = {
     invoke<LyricsPayload>("save_lyrics", { trackId, text }),
   forgetLyrics: (trackId: string) => invoke<LyricsPayload>("forget_lyrics", { trackId }),
   checkForUpdate: () => invoke<UpdateInfo | null>("check_for_update"),
+  installUpdate: () => invoke<void>("install_update"),
 };
 
 /** Turn an absolute local path into a URL the webview can stream from. */
