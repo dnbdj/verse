@@ -238,6 +238,36 @@ export function DiceIcon({ size = 15 }: IconProps) {
   );
 }
 
+export function PaletteIcon({ size = 17 }: IconProps) {
+  return (
+    <svg {...frame(size)}>
+      <path d="M12 3.4a8.6 8.6 0 1 0 0 17.2c1.2 0 1.8-.9 1.5-2-.3-1.2.4-2.2 1.7-2.2h1.7c2.2 0 3.7-1.5 3.7-3.7A9.3 9.3 0 0 0 12 3.4Z" />
+      <circle cx="8.2" cy="10" r="1.1" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="7.4" r="1.1" fill="currentColor" stroke="none" />
+      <circle cx="8.2" cy="14.4" r="1.1" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+export function DownloadIcon({ size = 15 }: IconProps) {
+  return (
+    <svg {...frame(size)}>
+      <path d="M12 4v10" />
+      <path d="m7.6 10.4 4.4 4.4 4.4-4.4" />
+      <path d="M5 19.4h14" />
+    </svg>
+  );
+}
+
+export function LockIcon({ size = 15 }: IconProps) {
+  return (
+    <svg {...frame(size)}>
+      <rect x="4.8" y="10.2" width="14.4" height="9.4" rx="2.3" />
+      <path d="M8.4 10.2V7.9a3.6 3.6 0 0 1 7.2 0v2.3" />
+    </svg>
+  );
+}
+
 export function TrashIcon({ size = 15 }: IconProps) {
   return (
     <svg {...frame(size)}>

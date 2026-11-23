@@ -1048,7 +1048,7 @@ export default function App() {
     servicePage
       ? `${servicePage.capability} · ${servicePage.note}`
       : view === "settings"
-      ? "Themes, accent colour and how much of the desktop shows through"
+      ? "Modules for personalisation, streaming services, versions and backups"
       : view === "spotify"
         ? spotify.status?.connected
           ? `Remote control${spotify.status.name ? ` · ${spotify.status.name}` : ""}`
@@ -1299,6 +1299,7 @@ export default function App() {
               artists={artists.length}
               folders={library.folders.length}
               pinned={pinnedServices}
+              onTogglePin={togglePin}
               savedLooks={savedLooks}
               onSaveLook={addLook}
               onDeleteLook={deleteLook}

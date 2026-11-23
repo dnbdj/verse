@@ -620,6 +620,7 @@ pub fn run() {
             take_deep_link,
             update::check_for_update,
             update::install_update,
+            update::list_releases,
             save_bundle,
             open_bundle,
             lyrics_for,

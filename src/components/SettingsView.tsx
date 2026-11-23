@@ -9,7 +9,8 @@ import {
   type ImportSections,
 } from "../lib/importPlan";
 import { deepLinkFor } from "../lib/deepLink";
-import { insideTauri, isAndroid } from "../lib/platform";
+import { insideTauri } from "../lib/platform";
+import { SERVICES, type ServiceId } from "../lib/services";
 import { STARTER_LOOKS, decodeLook, encodeLook, lookLink } from "../lib/share";
 import {
   ACCENTS,
@@ -26,8 +27,23 @@ import {
   type Gradient,
   type SavedLook,
 } from "../lib/theme";
-import { CheckIcon, CloseIcon, CopyIcon, DiceIcon, PinIcon, TrashIcon } from "./icons";
+import {
+  CheckIcon,
+  ChevronIcon,
+  CloseIcon,
+  CopyIcon,
+  DiceIcon,
+  DownloadIcon,
+  FolderIcon,
+  LockIcon,
+  MusicIcon,
+  PaletteIcon,
+  PinIcon,
+  TrashIcon,
+  VolumeIcon,
+} from "./icons";
 import { LookQr } from "./LookQr";
+import { VersionHistory } from "./VersionHistory";
 
 type Props = {
   appearance: Appearance;
@@ -43,7 +59,9 @@ type Props = {
   albums: number;
   artists: number;
   folders: number;
-  pinned: string[];
+  pinned: ServiceId[];
+  /** Pins or unpins a streaming service for the sidebar and Alt+1…9. */
+  onTogglePin: (id: ServiceId) => void;
   savedLooks: SavedLook[];
   /** Builds the JSON bundle text; the file write stays here so App keeps no IO. */
   onExportBundle: () => string;
@@ -61,6 +79,65 @@ const SECTION_LABELS: { key: keyof ImportSections; label: string }[] = [
   { key: "pins", label: "pinned services" },
   { key: "appearance", label: "appearance" },
 ];
+
+/** Settings opens on a tile board and each tile is one of these pages. */
+type ModuleId = "personalisation" | "services" | "versions" | "backup" | "library";
+
+const MODULES: { id: ModuleId; label: string; note: string }[] = [
+  {
+    id: "personalisation",
+    label: "Personalisation",
+    note: "Themes, wallpaper gradient, accent colour, motion and saved looks",
+  },
+  {
+    id: "services",
+    label: "Streaming services",
+    note: "Pin services for the sidebar and the Alt+1…9 shortcuts",
+  },
+  {
+    id: "versions",
+    label: "Versions",
+    note: "Changelog, previous releases and the build you are running",
+  },
+  {
+    id: "backup",
+    label: "Backup & transfer",
+    note: "Move playlists, looks, pins and appearance between devices",
+  },
+  {
+    id: "library",
+    label: "Library",
+    note: "Songs, albums, artists and the folders Verse watches",
+  },
+];
+
+/** Tiles that are visible on the board but have nothing behind them yet. */
+const SOON: { id: string; label: string; note: string }[] = [
+  { id: "playback", label: "Playback", note: "Equaliser, crossfade and gapless playback" },
+  { id: "storage", label: "Storage", note: "Cache limits, offline copies and cleanup" },
+  { id: "privacy", label: "Privacy", note: "What leaves this device, and when" },
+];
+
+function ModuleIcon({ id }: { id: ModuleId }) {
+  switch (id) {
+    case "personalisation":
+      return <PaletteIcon size={17} />;
+    case "services":
+      return <MusicIcon size={17} />;
+    case "versions":
+      return <DownloadIcon size={17} />;
+    case "backup":
+      return <CopyIcon size={17} />;
+    case "library":
+      return <FolderIcon size={17} />;
+  }
+}
+
+function SoonIcon({ id }: { id: string }) {
+  if (id === "playback") return <VolumeIcon size={17} />;
+  if (id === "storage") return <FolderIcon size={17} />;
+  return <LockIcon size={17} />;
+}
 
 const pct = (value: number, min: number, max: number) =>
   `${((value - min) / (max - min)) * 100}%`;
@@ -167,11 +244,13 @@ export function SettingsView({
   artists,
   folders,
   pinned,
+  onTogglePin,
   savedLooks,
   onExportBundle,
   onPlanBundle,
   onApplyBundle,
 }: Props) {
+  const [module, setModule] = useState<ModuleId | null>(null);
   const [lookName, setLookName] = useState("");
   const [importCode, setImportCode] = useState("");
   const [shareNote, setShareNote] = useState<string | null>(null);
@@ -347,11 +426,65 @@ export function SettingsView({
   return (
     <div className="settings">
       <div className="settings-top">
-        <span className="settings-top-note">Changes save as you go</span>
+        <div className="settings-top-left">
+          {module !== null && (
+            <button className="settings-back" onClick={() => setModule(null)}>
+              <ChevronIcon dir="left" size={14} />
+              Settings
+            </button>
+          )}
+          <span className="settings-top-note">
+            {module ? MODULES.find((entry) => entry.id === module)?.label : "Changes save as you go"}
+          </span>
+        </div>
         <button className="btn btn-quiet" onClick={onDone}>
           Done
         </button>
       </div>
+
+      {module === null && (
+        <div className="settings-home">
+          <div className="settings-home-head">
+            <h2 className="settings-home-title">Modules</h2>
+            <p className="settings-home-sub">
+              Everything is grouped into a module. Open one to change it — more are on the way.
+            </p>
+          </div>
+          <div className="settings-grid">
+            {MODULES.map((entry) => (
+              <button
+                key={entry.id}
+                className="settings-tile"
+                onClick={() => setModule(entry.id)}
+              >
+                <span className="settings-tile-icon">
+                  <ModuleIcon id={entry.id} />
+                </span>
+                <span className="settings-tile-text">
+                  <span className="settings-tile-title">{entry.label}</span>
+                  <span className="settings-tile-note">{entry.note}</span>
+                </span>
+                <ChevronIcon dir="right" size={15} />
+              </button>
+            ))}
+            {SOON.map((entry) => (
+              <div className="settings-tile" data-soon="true" key={entry.id}>
+                <span className="settings-tile-icon">
+                  <SoonIcon id={entry.id} />
+                </span>
+                <span className="settings-tile-text">
+                  <span className="settings-tile-title">{entry.label}</span>
+                  <span className="settings-tile-note">{entry.note}</span>
+                </span>
+                <span className="settings-soon">Coming soon</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {module === "personalisation" && (
+        <>
       <section className="settings-group">
         <div className="settings-head">
           <div className="settings-head-title">Appearance</div>
@@ -706,7 +839,10 @@ export function SettingsView({
           )}
         </div>
       </section>
+        </>
+      )}
 
+      {module === "backup" && (
       <section className="settings-group">
         <div className="settings-head">
           <div className="settings-head-title">Backup &amp; transfer</div>
@@ -952,7 +1088,10 @@ export function SettingsView({
           )}
         </div>
       </section>
+      )}
 
+      {module === "personalisation" && (
+        <>
       <section className="settings-group">
         <div className="settings-head">
           <div className="settings-head-title">Starter pack</div>
@@ -1242,7 +1381,10 @@ export function SettingsView({
           </button>
         </div>
       </section>
+        </>
+      )}
 
+      {module === "library" && (
       <section className="settings-group">
         <div className="settings-head">
           <div className="settings-head-title">Library</div>
@@ -1279,24 +1421,50 @@ export function SettingsView({
           </div>
         </div>
       </section>
+      )}
 
-      <section className="settings-group">
-        <div className="settings-rows">
-          <div className="settings-row">
-            <div className="setting-title">Verse</div>
-            <div className="setting-value">{pkg.version}</div>
+      {module === "services" && (
+        <section className="settings-group">
+          <div className="settings-head">
+            <div className="settings-head-title">Streaming services</div>
+            <div className="settings-head-sub">
+              Pinned services sit at the top of Services and answer Alt+1…9 in pin order. Pinning
+              only changes where a service shows; it never changes what it can play.
+            </div>
           </div>
-          <div className="settings-row">
-            <div className="setting-title">Platform</div>
-            <div className="setting-value">{isAndroid() ? "Android" : "Desktop"}</div>
+          <div className="settings-rows">
+            {SERVICES.map((service) => {
+              const isPinned = pinned.includes(service.id);
+              return (
+                <div className="settings-row settings-service-row" key={service.id}>
+                  <span
+                    className="settings-service-mark"
+                    style={{ background: service.color }}
+                    aria-hidden
+                  >
+                    {service.mark}
+                  </span>
+                  <div className="settings-label">
+                    <div className="setting-title">{service.name}</div>
+                    <div className="setting-sub">{service.capability}</div>
+                  </div>
+                  <button
+                    className="btn btn-quiet"
+                    data-active={isPinned}
+                    aria-pressed={isPinned}
+                    onClick={() => onTogglePin(service.id)}
+                  >
+                    <PinIcon size={12} filled={isPinned} />
+                    {isPinned ? "Pinned" : "Pin"}
+                  </button>
+                </div>
+              );
+            })}
           </div>
-        </div>
-        <div className="settings-foot">
-          Local files, synced lyrics, a Spotify remote and link hand-off to YouTube Music,
-          SoundCloud, Deezer, Amazon Music, TIDAL, Apple Music and Bandcamp. Nothing leaves this
-          device except lyric lookups and the service requests you ask for.
-        </div>
-      </section>
+        </section>
+      )}
+
+      {module === "versions" && <VersionHistory current={pkg.version} />}
     </div>
   );
 }

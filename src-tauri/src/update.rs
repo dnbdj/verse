@@ -181,8 +181,8 @@ pub fn check_for_update(app: AppHandle) -> Result<Option<UpdateInfo>, String> {
     Ok(Some(info))
 }
 
-/// The `.exe` attached to a release, preferring the build named for Windows.
-fn windows_asset(release: &serde_json::Value) -> Option<String> {
+/// The `.exe` attached to a release and its size, preferring the Windows build.
+fn windows_asset(release: &serde_json::Value) -> Option<(String, u64)> {
     let assets = release.get("assets")?.as_array()?;
     let mut fallback = None;
     for asset in assets {
@@ -199,11 +199,18 @@ fn windows_asset(release: &serde_json::Value) -> Option<String> {
         if !name.ends_with(".exe") {
             continue;
         }
+        let entry = (
+            url.to_string(),
+            asset
+                .get("size")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0),
+        );
         if name.contains("windows") {
-            return Some(url.to_string());
+            return Some(entry);
         }
         if fallback.is_none() {
-            fallback = Some(url.to_string());
+            fallback = Some(entry);
         }
     }
     fallback
@@ -315,7 +322,8 @@ async fn install_windows(app: AppHandle) -> Result<(), String> {
     if !is_newer(tag, &current) {
         return Err("this build is already the newest version".to_string());
     }
-    let url = windows_asset(&release).ok_or("the release has no Windows build attached")?;
+    let (url, _size) =
+        windows_asset(&release).ok_or("the release has no Windows build attached")?;
 
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
         let download = download_exe(&url)?;
@@ -328,6 +336,74 @@ async fn install_windows(app: AppHandle) -> Result<(), String> {
     std::thread::sleep(Duration::from_millis(600));
     app.exit(0);
     Ok(())
+}
+
+/// One published release, as the changelog in Settings shows it.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseInfo {
+    pub version: String,
+    pub name: String,
+    pub notes: String,
+    pub url: String,
+    pub published_at: String,
+    pub download_url: Option<String>,
+    pub download_size: u64,
+}
+
+/// Every published release, newest first.
+#[tauri::command]
+pub fn list_releases() -> Result<Vec<ReleaseInfo>, String> {
+    let url = format!("https://api.github.com/repos/{REPO}/releases?per_page=20");
+    let response = ureq::get(&url)
+        .set("User-Agent", USER_AGENT)
+        .set("Accept", "application/vnd.github+json")
+        .timeout(Duration::from_secs(8))
+        .call()
+        .map_err(|e| e.to_string())?;
+    let body: serde_json::Value = response.into_json().map_err(|e| e.to_string())?;
+    let releases = body
+        .as_array()
+        .ok_or("GitHub returned an unexpected release list")?;
+
+    Ok(releases
+        .iter()
+        .filter(|release| release.get("draft").and_then(|value| value.as_bool()) != Some(true))
+        .map(|release| {
+            let asset = windows_asset(release);
+            let tag = release
+                .get("tag_name")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default();
+            ReleaseInfo {
+                version: tag.trim_start_matches(['v', 'V']).to_string(),
+                name: release
+                    .get("name")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                notes: release
+                    .get("body")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_default()
+                    .chars()
+                    .take(4000)
+                    .collect(),
+                url: release
+                    .get("html_url")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                published_at: release
+                    .get("published_at")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                download_url: asset.as_ref().map(|(url, _)| url.clone()),
+                download_size: asset.map(|(_, size)| size).unwrap_or(0),
+            }
+        })
+        .collect())
 }
 
 /// Downloads the newest release, swaps it in and reopens Verse on the new build.
