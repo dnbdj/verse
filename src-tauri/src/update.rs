@@ -2,15 +2,17 @@
 //!
 //! Each launch compares the newest release tag with the running version, raises a
 //! desktop notification and hands the release to the UI. The Download button then
-//! fetches the attached `.exe` directly: a detached helper waits for Verse to exit,
-//! replaces the running file with the download and starts the new build.
+//! fetches the attached `.exe` directly: a detached copy of Verse stages it beside
+//! the app, swaps it in once the old process has closed, and reopens the previous
+//! build if anything about the swap fails.
 
 use std::fs::{self, File};
-use std::io::{self, Read};
+use std::io::{Read, Write};
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use serde::Serialize;
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 
 /// The public repository whose Releases carry Verse builds.
 const REPO: &str = "dnbdj/verse";
@@ -27,6 +29,14 @@ pub struct UpdateInfo {
     pub url: String,
     /// Release notes, already trimmed to a readable length.
     pub notes: String,
+}
+
+/// Bytes downloaded so far, streamed to the banner while an update fetches.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct DownloadProgress {
+    received: u64,
+    total: u64,
 }
 
 /// Numeric parts of a tag like `v1.2.3`, ignoring any suffix after the numbers.
@@ -218,7 +228,7 @@ fn windows_asset(release: &serde_json::Value) -> Option<(String, u64)> {
 
 /// Downloads a release `.exe` into the temp folder, refusing anything suspicious.
 #[cfg(windows)]
-fn download_exe(url: &str) -> Result<std::path::PathBuf, String> {
+fn download_exe(url: &str, app: &AppHandle) -> Result<std::path::PathBuf, String> {
     let folder = std::env::temp_dir().join("verse-update");
     fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
     let target = folder.join("Verse-new.exe");
@@ -235,7 +245,31 @@ fn download_exe(url: &str) -> Result<std::path::PathBuf, String> {
 
     let mut reader = response.into_reader();
     let mut file = File::create(&target).map_err(|e| e.to_string())?;
-    let written = io::copy(&mut reader, &mut file).map_err(|e| e.to_string())?;
+    let mut buffer = vec![0u8; 64 * 1024];
+    let mut written = 0u64;
+    let mut announced = 0u64;
+    let progress = |received: u64| {
+        let _ = app.emit(
+            "update-download",
+            DownloadProgress {
+                received,
+                total: expected.max(received),
+            },
+        );
+    };
+    progress(0);
+    loop {
+        let read = reader.read(&mut buffer).map_err(|e| e.to_string())?;
+        if read == 0 {
+            break;
+        }
+        file.write_all(&buffer[..read]).map_err(|e| e.to_string())?;
+        written += read as u64;
+        if written - announced >= 131_072 {
+            announced = written;
+            progress(written);
+        }
+    }
     drop(file);
 
     // A truncated download or an HTML error page must never replace the app.
@@ -252,19 +286,151 @@ fn download_exe(url: &str) -> Result<std::path::PathBuf, String> {
     if &signature != b"MZ" {
         return Err("the download was not a Windows program".to_string());
     }
+    progress(written);
     Ok(target)
 }
 
-/// A PowerShell single-quoted literal for a Windows path.
-#[cfg(windows)]
-fn quote(path: &std::path::Path) -> String {
-    format!("'{}'", path.display().to_string().replace('\'', "''"))
+/// How the updater copy is told to swap a downloaded exe into place.
+const REPLACE_FLAG: &str = "--apply-update";
+
+/// Written by the updater once the replacement is staged. The running app waits for
+/// it before closing, so an updater that never starts leaves Verse open.
+const READY_FILE: &str = "updater-ready";
+
+fn ready_path() -> std::path::PathBuf {
+    std::env::temp_dir().join("verse-update").join(READY_FILE)
 }
 
-/// Starts a detached helper that waits for this process to exit, replaces the exe
-/// with the download and launches it. A running file cannot overwrite itself.
+/// Appends a line to the updater log, so a swap that fails stays diagnosable.
+fn note_update(message: &str) {
+    use std::io::Write as _;
+    let folder = std::env::temp_dir().join("verse-update");
+    let _ = fs::create_dir_all(&folder);
+    if let Ok(mut log) = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(folder.join("update.log"))
+    {
+        let _ = writeln!(log, "{message}");
+    }
+}
+
+/// The arguments the updater copy starts with, when this process is that copy.
+pub fn replacer_request() -> Option<(std::path::PathBuf, std::path::PathBuf)> {
+    let mut args = std::env::args_os().skip(1);
+    if args.next()?.to_str()? != REPLACE_FLAG {
+        return None;
+    }
+    Some((
+        std::path::PathBuf::from(args.next()?),
+        std::path::PathBuf::from(args.next()?),
+    ))
+}
+
+/// Removes the updater copy and its readiness marker, then exits.
+fn finish(code: i32) -> ! {
+    let _ = fs::remove_file(ready_path());
+    if let Ok(me) = std::env::current_exe() {
+        let _ = fs::remove_file(me);
+    }
+    std::process::exit(code);
+}
+
+/// Opens the build that was running before the swap. A failed update must never
+/// leave Verse closed, so every failure path ends here.
+fn reopen_old(target: &std::path::Path, backup: &std::path::Path) -> ! {
+    // The target is intact unless the rollback itself failed; in that case the
+    // renamed backup still runs the old build.
+    let old = if target.is_file() {
+        target
+    } else if backup.is_file() {
+        backup
+    } else {
+        target
+    };
+    if let Err(error) = Command::new(old).spawn() {
+        note_update(&format!("could not reopen the previous Verse: {error}"));
+    }
+    finish(1)
+}
+
+/// Waits for the old Verse to close, swaps the downloaded exe in and opens it.
+/// Runs in a copy of Verse, before any window, plugin or database exists. The swap
+/// is staged next to the app and the old build is kept aside until the new one has
+/// started, so a failure at any step restores and reopens the previous build.
+pub fn run_replacer(download: std::path::PathBuf, target: std::path::PathBuf) -> ! {
+    note_update("updater started");
+    // The old build still owns its exe for a moment after it closes.
+    std::thread::sleep(Duration::from_millis(300));
+
+    let staged = target.with_extension("update.exe");
+    let backup = target.with_extension("previous.exe");
+    let _ = fs::remove_file(&staged);
+    let _ = fs::remove_file(&backup);
+
+    // Stage the replacement on the same volume as the app, so putting it in place
+    // is a rename instead of an in-place copy that could leave a half-written exe.
+    if let Err(error) = fs::copy(&download, &staged) {
+        note_update(&format!("could not stage the download: {error}"));
+        let _ = fs::remove_file(&staged);
+        reopen_old(&target, &backup);
+    }
+    let _ = fs::write(ready_path(), b"staged");
+
+    // The old build keeps its exe open until Windows has released it; opening it
+    // for writing only succeeds once that has happened.
+    let mut unlocked = false;
+    for _ in 0..240 {
+        if fs::OpenOptions::new().write(true).open(&target).is_ok() {
+            unlocked = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    if !unlocked {
+        note_update("gave up waiting for the old build to close");
+        let _ = fs::remove_file(&staged);
+        reopen_old(&target, &backup);
+    }
+
+    if let Err(error) = fs::rename(&target, &backup) {
+        note_update(&format!("could not move the old build aside: {error}"));
+        let _ = fs::remove_file(&staged);
+        reopen_old(&target, &backup);
+    }
+
+    if let Err(error) = fs::rename(&staged, &target) {
+        note_update(&format!("could not put the new build in place: {error}"));
+        let _ = fs::remove_file(&target);
+        let _ = fs::rename(&backup, &target);
+        reopen_old(&target, &backup);
+    }
+    note_update("new build copied");
+
+    match Command::new(&target).spawn() {
+        Ok(_) => {
+            note_update("new build started");
+            let _ = fs::remove_file(&backup);
+            let _ = fs::remove_file(&download);
+            finish(0)
+        }
+        Err(error) => {
+            // The new build cannot run: put the old one back and reopen it.
+            note_update(&format!("the new build would not start: {error}"));
+            let _ = fs::remove_file(&target);
+            if let Err(restore) = fs::rename(&backup, &target) {
+                note_update(&format!("could not restore the old build: {restore}"));
+            }
+            reopen_old(&target, &backup)
+        }
+    }
+}
+
+/// Copies Verse beside the download, then starts that copy as the replacer. Using
+/// Verse itself instead of a script host means no execution policy, antivirus
+/// script scanning or console handles can stop the swap.
 #[cfg(windows)]
-fn start_replacer(download: &std::path::Path) -> Result<(), String> {
+fn start_replacer(download: &std::path::Path) -> Result<std::process::Child, String> {
     use std::os::windows::process::CommandExt;
 
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -272,43 +438,27 @@ fn start_replacer(download: &std::path::Path) -> Result<(), String> {
 
     let current = std::env::current_exe().map_err(|e| e.to_string())?;
     let folder = std::env::temp_dir().join("verse-update");
-    let script = folder.join("install-update.ps1");
-    let pid = std::process::id();
+    fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    let updater = folder.join("Verse-updater.exe");
+    // A copy left by an earlier attempt may still be running.
+    let _ = fs::remove_file(&updater);
+    let _ = fs::remove_file(ready_path());
+    fs::copy(&current, &updater).map_err(|e| format!("could not prepare the updater: {e}"))?;
 
-    let body = format!(
-        "Wait-Process -Id {pid} -ErrorAction SilentlyContinue\r\n\
-         $new = {new}\r\n\
-         $target = {target}\r\n\
-         for ($attempt = 0; $attempt -lt 120; $attempt++) {{\r\n\
-           try {{\r\n\
-             Copy-Item -LiteralPath $new -Destination $target -Force -ErrorAction Stop\r\n\
-             break\r\n\
-           }} catch {{\r\n\
-             Start-Sleep -Milliseconds 500\r\n\
-           }}\r\n\
-         }}\r\n\
-         Start-Process -FilePath $target\r\n\
-         Remove-Item -LiteralPath $new -Force -ErrorAction SilentlyContinue\r\n\
-         Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue\r\n",
-        new = quote(download),
-        target = quote(&current),
-    );
-    fs::write(&script, body).map_err(|e| e.to_string())?;
-
-    std::process::Command::new("powershell.exe")
+    let child = Command::new(&updater)
         .args([
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-WindowStyle",
-            "Hidden",
-            "-File",
-            &script.display().to_string(),
+            REPLACE_FLAG,
+            &download.display().to_string(),
+            &current.display().to_string(),
         ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
         .spawn()
         .map_err(|e| format!("could not start the updater: {e}"))?;
-    Ok(())
+    note_update("updater copy started");
+    Ok(child)
 }
 
 #[cfg(windows)]
@@ -325,15 +475,32 @@ async fn install_windows(app: AppHandle) -> Result<(), String> {
     let (url, _size) =
         windows_asset(&release).ok_or("the release has no Windows build attached")?;
 
+    let handle = app.clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
-        let download = download_exe(&url)?;
-        start_replacer(&download)
+        let download = download_exe(&url, &handle)?;
+        let mut child = start_replacer(&download)?;
+
+        // Do not close Verse until the updater confirms the replacement is staged.
+        // If it exits first, the old build stays open and the banner shows the error.
+        for _ in 0..80 {
+            if ready_path().is_file() {
+                std::thread::sleep(Duration::from_millis(300));
+                return Ok(());
+            }
+            if let Ok(Some(status)) = child.try_wait() {
+                return Err(format!(
+                    "the updater stopped before the swap began ({status})"
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(250));
+        }
+        let _ = child.kill();
+        Err("the updater did not start, so Verse is still open".to_string())
     })
     .await
     .map_err(|e| e.to_string())??;
 
-    // Let the helper attach, then close so the exe file unlocks for the swap.
-    std::thread::sleep(Duration::from_millis(600));
+    // The updater is staged and waiting; closing unlocks the exe for the swap.
     app.exit(0);
     Ok(())
 }

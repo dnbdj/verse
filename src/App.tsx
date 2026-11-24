@@ -109,6 +109,7 @@ export default function App() {
   const [arrival, setArrival] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [updating, setUpdating] = useState(false);
+  const [updateProgress, setUpdateProgress] = useState<number | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [previewArtwork, setPreviewArtwork] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
@@ -254,6 +255,15 @@ export default function App() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // While an update downloads, Rust reports the bytes it has so far, so the banner
+  // can show a bar instead of a spinner with no idea how long is left.
+  useEffect(() => {
+    if (!insideTauri()) return;
+    return api.onUpdateProgress(({ received, total }) => {
+      setUpdateProgress(total > 0 ? Math.min(1, received / total) : null);
+    });
   }, []);
 
   // The desktop app receives verse:// links from Rust: one held from launch for the
@@ -1122,7 +1132,11 @@ export default function App() {
             {updateError
               ? `Update failed: ${updateError}`
               : updating
-                ? `Downloading Verse ${updateInfo.latest} — Verse restarts when it is ready.`
+                ? updateProgress === null
+                  ? `Downloading Verse ${updateInfo.latest} — Verse restarts when it is ready.`
+                  : updateProgress >= 1
+                    ? `Installing Verse ${updateInfo.latest} — Verse reopens in a moment.`
+                    : `Downloading Verse ${updateInfo.latest} — ${Math.round(updateProgress * 100)}%. Verse restarts when it is ready.`
                 : `Verse ${updateInfo.latest} is available — you are on ${updateInfo.current}.`}
           </span>
           <button
@@ -1131,9 +1145,11 @@ export default function App() {
             onClick={() => {
               setUpdating(true);
               setUpdateError(null);
+              setUpdateProgress(0);
               void api.installUpdate().catch((error) => {
                 setUpdateError(String(error));
                 setUpdating(false);
+                setUpdateProgress(null);
               });
             }}
           >
@@ -1146,6 +1162,18 @@ export default function App() {
           >
             <CloseIcon size={13} />
           </button>
+          {updating && (
+            <span
+              className="update-progress"
+              role="progressbar"
+              aria-label="Update download"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round((updateProgress ?? 0) * 100)}
+            >
+              <span style={{ width: `${Math.round((updateProgress ?? 0) * 100)}%` }} />
+            </span>
+          )}
         </div>
       )}
 

@@ -531,6 +531,12 @@ fn forget_lyrics(db: State<'_, Db>, track_id: String) -> Result<LyricsPayload, S
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // A copy of Verse started with --apply-update is the updater: it swaps the
+    // downloaded exe in and reopens the app, then exits before any UI exists.
+    if let Some((download, target)) = update::replacer_request() {
+        update::run_replacer(download, target);
+    }
+
     let builder = tauri::Builder::default();
 
     // The single-instance plugin must be registered first, so a second launch on

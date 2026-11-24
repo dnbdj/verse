@@ -1,4 +1,5 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type { Folder, LyricsPayload, Playlist, RemoteTrack, ScanSummary, Track } from "./types";
 
 /** The newest GitHub release, when it is newer than this build. */
@@ -52,6 +53,23 @@ export const api = {
   forgetLyrics: (trackId: string) => invoke<LyricsPayload>("forget_lyrics", { trackId }),
   checkForUpdate: () => invoke<UpdateInfo | null>("check_for_update"),
   installUpdate: () => invoke<void>("install_update"),
+  /** Download progress for the updater, as a 0–1 fraction; no-op in the browser. */
+  onUpdateProgress: (handler: (progress: { received: number; total: number }) => void) => {
+    let unlisten: (() => void) | null = null;
+    let stopped = false;
+    void listen<{ received: number; total: number }>("update-download", (event) =>
+      handler(event.payload),
+    )
+      .then((stop) => {
+        if (stopped) stop();
+        else unlisten = stop;
+      })
+      .catch(() => {});
+    return () => {
+      stopped = true;
+      unlisten?.();
+    };
+  },
   /** Falls back to the public GitHub API so the browser preview can show it too. */
   listReleases: async (): Promise<ReleaseInfo[]> => {
     try {
